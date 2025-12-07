@@ -1,0 +1,25 @@
+#!/bin/bash
+
+# Script to get current battery charge threshold
+# Returns: 80 or 100
+
+STATE_FILE="$HOME/.local/state/omarchy/battery-threshold"
+
+# If state file exists, validate and return its value
+if [[ -f "$STATE_FILE" ]]; then
+  THRESHOLD=$(cat "$STATE_FILE" 2>/dev/null)
+
+  # Validate threshold value
+  case "$THRESHOLD" in
+    80|100)
+      echo "$THRESHOLD"
+      exit 0
+      ;;
+    *)
+      # Invalid value in state file
+      ;;
+  esac
+fi
+
+# Default to 80% for battery health
+echo "80"

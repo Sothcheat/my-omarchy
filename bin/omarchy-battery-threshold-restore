@@ -1,0 +1,76 @@
+#!/bin/bash
+
+# Script to restore battery charge threshold on boot
+# Called by systemd service
+# Exits gracefully if battery/support is not available
+
+# Get user's home directory (works even when run as root or user)
+USER_HOME="${HOME:-$(eval echo ~$USER)}"
+
+if [[ -z "$USER_HOME" || ! -d "$USER_HOME" ]]; then
+  echo "Error: Could not determine user home directory" >&2
+  exit 1
+fi
+
+STATE_FILE="$USER_HOME/.local/state/omarchy/battery-threshold"
+
+# Check for battery first (exit gracefully if none)
+if ! ls /sys/class/power_supply/BAT* &>/dev/null 2>&1 && \
+   ! [[ -d /sys/class/power_supply/battery ]]; then
+  # No battery - this is expected on desktops, not an error
+  exit 0
+fi
+
+# Check if we have a saved preference
+if [[ -f "$STATE_FILE" ]]; then
+  THRESHOLD=$(cat "$STATE_FILE" 2>/dev/null)
+
+  # Validate threshold
+  case "$THRESHOLD" in
+    80|100)
+      # Valid threshold, continue
+      ;;
+    *)
+      echo "Warning: Invalid threshold in state file: '$THRESHOLD', using default" >&2
+      THRESHOLD="80"
+      ;;
+  esac
+else
+  THRESHOLD="80"
+fi
+
+# Find the correct threshold file
+THRESHOLD_FILE=""
+for path in /sys/class/power_supply/BAT*/charge_control_end_threshold \
+            /sys/class/power_supply/battery/charge_control_end_threshold; do
+  if [[ -f "$path" ]]; then
+    THRESHOLD_FILE="$path"
+    break
+  fi
+done
+
+if [[ -z "$THRESHOLD_FILE" ]]; then
+  # Threshold control not supported - exit gracefully
+  # This can happen on laptops without manufacturer support
+  exit 0
+fi
+
+# Validate file exists
+if [[ ! -f "$THRESHOLD_FILE" ]]; then
+  exit 0
+fi
+
+# Apply the threshold
+if echo "$THRESHOLD" | sudo tee "$THRESHOLD_FILE" > /dev/null 2>&1; then
+  # Verify it was set
+  ACTUAL=$(cat "$THRESHOLD_FILE" 2>/dev/null)
+  if [[ "$ACTUAL" == "$THRESHOLD" ]]; then
+    echo "Battery charge threshold restored to ${THRESHOLD}%"
+  else
+    echo "Warning: Threshold set to ${ACTUAL}% instead of ${THRESHOLD}%"
+  fi
+else
+  echo "Warning: Failed to restore battery charge threshold" >&2
+fi
+
+exit 0
